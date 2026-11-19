@@ -1,7 +1,7 @@
-from profiles import me, IanaR, MashaSt
+from profiles import me
 from src.analytics.profile_metrics import calculate_age, calculate_ftp_per_kg
 
-cyclists = [me, IanaR, MashaSt]
+cyclists = [me]
 
 for cyclist in cyclists:
     print("Имя:", cyclist.name)

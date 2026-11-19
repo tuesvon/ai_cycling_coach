@@ -1,28 +1,55 @@
 import os
 import requests
+
 from dotenv import load_dotenv
 from datetime import date, timedelta
 
+
 load_dotenv()
 
-API_KEY = os.getenv("INTERVALS_API_KEY")
 BASE_URL = "https://intervals.icu/api/v1"
 
 
-def get_athlete_profile():
-    if not API_KEY:
+def get_api_key(api_key=None):
+    """
+    Возвращает API-ключ конкретного спортсмена.
+    Если ключ не передан, использует ключ из .env.
+    """
+
+    key = api_key or os.getenv("INTERVALS_API_KEY")
+
+    if not key:
         raise ValueError("Не найден API-ключ Intervals.icu")
 
-    url = f"{BASE_URL}/athlete/0"
+    return key
+
+
+def make_request(endpoint, api_key=None, params=None, timeout=20):
+    """
+    Универсальная функция запросов к Intervals.icu.
+    """
+
+    key = get_api_key(api_key)
+
+    url = f"{BASE_URL}{endpoint}"
 
     response = requests.get(
         url,
-        auth=("API_KEY", API_KEY),
-        timeout=20
+        auth=("API_KEY", key),
+        params=params,
+        timeout=timeout
     )
 
     response.raise_for_status()
+
     return response.json()
+
+
+def get_athlete_profile(api_key=None):
+    return make_request(
+        "/athlete/0",
+        api_key=api_key
+    )
 
 
 def get_cycling_settings(profile):
@@ -35,8 +62,9 @@ def get_cycling_settings(profile):
     raise ValueError("Велосипедные настройки не найдены")
 
 
-def get_athlete_data():
-    profile = get_athlete_profile()
+def get_athlete_data(api_key=None):
+    profile = get_athlete_profile(api_key=api_key)
+
     cycling = get_cycling_settings(profile)
 
     return {
@@ -54,18 +82,14 @@ def get_athlete_data():
         "hr_zone_names": cycling.get("hr_zone_names"),
     }
 
-def get_activities(days=30):
-    if not API_KEY:
-        raise ValueError("Не найден API-ключ Intervals.icu")
 
+def get_activities(days=30, *, api_key=None):
     today = date.today()
     oldest = today - timedelta(days=days)
 
-    url = f"{BASE_URL}/athlete/0/activities"
-
-    response = requests.get(
-        url,
-        auth=("API_KEY", API_KEY),
+    return make_request(
+        "/athlete/0/activities",
+        api_key=api_key,
         params={
             "oldest": oldest.isoformat(),
             "newest": today.isoformat()
@@ -73,6 +97,16 @@ def get_activities(days=30):
         timeout=30
     )
 
-    response.raise_for_status()
 
-    return response.json()
+def get_wellness(days=30, *, api_key=None):
+    today = date.today()
+    oldest = today - timedelta(days=days - 1)
+
+    return make_request(
+        "/athlete/0/wellness",
+        api_key=api_key,
+        params={
+            "oldest": oldest.isoformat(),
+            "newest": today.isoformat()
+        }
+    )

@@ -29,7 +29,7 @@ print("=== POWER ZONE BOUNDARIES ===")
 print(boundaries)
 
 # Анализируем уже сохранённый FIT
-fit_path = Path("data/fit") / f"{activity_id}.fit"
+fit_path = Path("../data/fit") / f"{activity_id}.fit"
 
 if not fit_path.exists():
     raise FileNotFoundError(f"FIT file not found: {fit_path}")

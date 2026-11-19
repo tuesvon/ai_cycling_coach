@@ -26,7 +26,7 @@ with ZipFile(BytesIO(zip_data)) as archive:
     fit_data = archive.read(fit_filename)
 
 # Сохраняем FIT в проект
-output_dir = Path("data/fit")
+output_dir = Path("../data/fit")
 output_dir.mkdir(parents=True, exist_ok=True)
 
 output_path = output_dir / f"{activity_id}.fit"

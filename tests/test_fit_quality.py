@@ -1,7 +1,7 @@
 from pathlib import Path
 from src.analytics.fit_metrics import read_fit_file
 
-fit_path = Path("data/fit/25119885413.fit")
+fit_path = Path("../data/fit/25119885413.fit")
 records = read_fit_file(fit_path)
 
 print("=== FIT QUALITY CHECK ===")

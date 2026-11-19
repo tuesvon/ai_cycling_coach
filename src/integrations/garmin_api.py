@@ -1,11 +1,11 @@
-
 import os
 import requests
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("GARMIN_PERSONAL_API_KEY")
+DEFAULT_API_KEY = os.getenv("GARMIN_PERSONAL_API_KEY")
 
 BASE_URL = "https://personal.connectapi.garmin.com"
 
@@ -15,13 +15,16 @@ TOKEN_URL = (
 )
 
 
-def get_access_token():
-    if not API_KEY:
-        raise ValueError("Garmin API key not found in .env")
+def get_access_token(api_key=None):
+    if api_key is None:
+        api_key = DEFAULT_API_KEY
+
+    if not api_key:
+        raise ValueError("Garmin API key not found")
 
     response = requests.post(
         TOKEN_URL,
-        headers={"Authorization": f"ApiKey {API_KEY}"},
+        headers={"Authorization": f"ApiKey {api_key}"},
         timeout=30
     )
 
@@ -35,10 +38,10 @@ def get_access_token():
     return token
 
 
-def get_activities(days=30):
+def get_activities(days=30, *, api_key=None):
     from datetime import date, timedelta
 
-    token = get_access_token()
+    token = get_access_token(api_key=api_key)
 
     today = date.today()
     start_date = today - timedelta(days=days)
@@ -64,9 +67,10 @@ def get_activities(days=30):
 
     return response.json()
 
-def get_activity_details(activity_id, token=None):
+
+def get_activity_details(activity_id, token=None, api_key=None):
     if token is None:
-        token = get_access_token()
+        token = get_access_token(api_key=api_key)
 
     url = f"{BASE_URL}/activity-service/activity/{activity_id}"
 
@@ -83,9 +87,9 @@ def get_activity_details(activity_id, token=None):
     return response.json()
 
 
-def download_activity_file(activity_id, token=None):
+def download_activity_file(activity_id, token=None, api_key=None):
     if token is None:
-        token = get_access_token()
+        token = get_access_token(api_key=api_key)
 
     url = f"{BASE_URL}/download-service/files/activity/{activity_id}"
 
