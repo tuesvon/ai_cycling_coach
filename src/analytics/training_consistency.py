@@ -61,6 +61,12 @@ def analyze_training_gaps(activities, today=None, events=None):
             "context": [],
             "unexplained_gaps": [],
             "classified_gaps": [],
+            "gap_category_counts": {
+                "normal": 0,
+                "short": 0,
+                "extended": 0,
+                "long": 0,
+            },
         }
 
     gaps = []

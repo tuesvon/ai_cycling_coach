@@ -33,6 +33,34 @@ DEFAULT_DATA_SOURCES = {
 }
 
 
+DEFAULT_ATHLETE_CAPABILITIES = {
+    "power_measurement_available": True,
+    "power_source": None,
+    "has_indoor_trainer": False,
+    "has_heart_rate_monitor": True,
+    "has_cadence_sensor": False,
+}
+
+
+def initialize_athlete_capabilities_table():
+    initialize_database()
+
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS athlete_capabilities (
+                athlete_id TEXT PRIMARY KEY,
+                power_measurement_available INTEGER NOT NULL DEFAULT 1,
+                power_source TEXT,
+                has_indoor_trainer INTEGER NOT NULL DEFAULT 0,
+                has_heart_rate_monitor INTEGER NOT NULL DEFAULT 1,
+                has_cadence_sensor INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (athlete_id)
+                    REFERENCES athletes (athlete_id)
+                    ON DELETE CASCADE
+            )
+        """)
+
 def initialize_athletes_table():
     initialize_database()
 
@@ -190,6 +218,126 @@ def get_athlete(athlete_id):
         "created_at": row["created_at"]
     }
 
+
+def save_athlete_capabilities(athlete_id, capabilities=None):
+    athlete = get_athlete(athlete_id)
+
+    if athlete is None:
+        raise ValueError("Спортсмен не найден в базе данных")
+
+    current = get_athlete_capabilities(athlete_id)
+
+    updated = {
+        **current,
+        **(capabilities or {})
+    }
+
+    allowed_fields = set(DEFAULT_ATHLETE_CAPABILITIES)
+
+    unknown_fields = set(updated) - allowed_fields
+
+    if unknown_fields:
+        raise ValueError(
+            f"Неизвестные возможности спортсмена: {unknown_fields}"
+        )
+
+    for field in (
+        "power_measurement_available",
+        "has_indoor_trainer",
+        "has_heart_rate_monitor",
+        "has_cadence_sensor",
+    ):
+        if not isinstance(updated[field], bool):
+            raise ValueError(f"{field} должен иметь значение bool")
+
+    allowed_sources = {
+        None,
+        "pedals",
+        "crank",
+        "spider",
+        "trainer",
+    }
+
+    if updated["power_source"] not in allowed_sources:
+        raise ValueError("Некорректный источник измерения мощности")
+
+    if (
+        not updated["power_measurement_available"]
+        and updated["power_source"] is not None
+    ):
+        raise ValueError(
+            "Нельзя указывать источник мощности, "
+            "если измерение мощности недоступно"
+        )
+
+    initialize_athlete_capabilities_table()
+
+    updated_at = datetime.now(timezone.utc).isoformat()
+
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.execute(
+            """
+            INSERT INTO athlete_capabilities (
+                athlete_id,
+                power_measurement_available,
+                power_source,
+                has_indoor_trainer,
+                has_heart_rate_monitor,
+                has_cadence_sensor,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(athlete_id)
+            DO UPDATE SET
+                power_measurement_available =
+                    excluded.power_measurement_available,
+                power_source = excluded.power_source,
+                has_indoor_trainer = excluded.has_indoor_trainer,
+                has_heart_rate_monitor =
+                    excluded.has_heart_rate_monitor,
+                has_cadence_sensor = excluded.has_cadence_sensor,
+                updated_at = excluded.updated_at
+            """,
+            (
+                str(athlete_id),
+                int(updated["power_measurement_available"]),
+                updated["power_source"],
+                int(updated["has_indoor_trainer"]),
+                int(updated["has_heart_rate_monitor"]),
+                int(updated["has_cadence_sensor"]),
+                updated_at,
+            )
+        )
+
+    return get_athlete_capabilities(athlete_id)
+
+
+def get_athlete_capabilities(athlete_id):
+    initialize_athlete_capabilities_table()
+
+    with sqlite3.connect(DATABASE_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM athlete_capabilities
+            WHERE athlete_id = ?
+            """,
+            (str(athlete_id),)
+        ).fetchone()
+
+    if row is None:
+        return DEFAULT_ATHLETE_CAPABILITIES.copy()
+
+    return {
+        "power_measurement_available":
+            bool(row["power_measurement_available"]),
+        "power_source": row["power_source"],
+        "has_indoor_trainer": bool(row["has_indoor_trainer"]),
+        "has_heart_rate_monitor": bool(row["has_heart_rate_monitor"]),
+        "has_cadence_sensor": bool(row["has_cadence_sensor"]),
+    }
 
 def get_all_athletes():
     initialize_athletes_table()

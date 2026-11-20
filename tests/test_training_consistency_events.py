@@ -85,3 +85,24 @@ real_events = get_athlete_events(
 pprint(real_events)
 
 print("\nВсе проверки успешно пройдены!")
+
+def test_empty_training_history():
+    result = analyze_training_gaps(
+        activities=[],
+        today=date(2026, 11, 19),
+    )
+
+    print("\n=== EMPTY TRAINING HISTORY TEST ===")
+    pprint(result)
+
+    assert result["classified_gaps"] == []
+    assert result["gap_category_counts"] == {
+        "normal": 0,
+        "short": 0,
+        "extended": 0,
+        "long": 0,
+    }
+
+    print("Проверка пустой истории тренировок пройдена!")
+
+test_empty_training_history()

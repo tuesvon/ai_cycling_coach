@@ -12,6 +12,9 @@ from datetime import date, datetime, timedelta, timezone
 from src.athletes.athlete_events import get_athlete_events
 from src.analytics.training_consistency import analyze_training_gaps
 
+from src.analytics.training_trends import analyze_training_trends
+
+from src.analytics.training_load_trends import analyze_training_load_trends
 
 def get_profile_metrics(athlete_id):
     return get_normalized_athlete_profile(athlete_id)
@@ -181,6 +184,14 @@ def get_registered_athlete_status(athlete_id):
 
     # История тренировок за 90 дней.
     status["training_history"] = summarize_training_history(
+        training_data["activities"]
+    )
+
+    status["training_trends"] = analyze_training_trends(
+        status["training_history"]
+    )
+
+    status["training_load_trends"] = analyze_training_load_trends(
         training_data["activities"]
     )
 

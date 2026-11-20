@@ -15,6 +15,12 @@ def test_registered_athlete_status():
     print("\n=== TRAINING HISTORY ===")
     pprint(status.get("training_history"), sort_dicts=False)
 
+    print("\n=== TRAINING TRENDS ===")
+    pprint(status["training_trends"], sort_dicts=False)
+
+    print("\n=== TRAINING LOAD TRENDS ===")
+    pprint(status["training_load_trends"], sort_dicts=False)
+
     print("\n=== TRAINING CONSISTENCY ===")
     pprint(status.get("training_consistency"), sort_dicts=False)
 

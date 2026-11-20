@@ -8,19 +8,26 @@ client = OpenAI(
 
 MODEL_NAME = "google/gemma-4-e4b"
 
+DEFAULT_SYSTEM_PROMPT = (
+    "Ты — профессиональный AI Cycling Coach. "
+    "Помогаешь анализировать велосипедные тренировки "
+    "и давать рекомендации спортсменам. "
+    "Отвечай на русском языке. "
+    "Опирайся на предоставленные данные. "
+    "Не выдумывай показатели, события и результаты тренировок. "
+    "Если данных недостаточно, прямо сообщи об этом. "
+    "Отделяй факты от предположений и рекомендаций. "
+    "Не ставь медицинские диагнозы."
+)
 
-def ask_gemma(message):
+
+def ask_gemma(message, system_prompt=None):
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "Ты — профессиональный AI Cycling Coach. "
-                    "Помогаешь анализировать велосипедные тренировки "
-                    "и давать рекомендации спортсменам. "
-                    "Отвечай на русском языке."
-                )
+                "content": system_prompt or DEFAULT_SYSTEM_PROMPT
             },
             {
                 "role": "user",
