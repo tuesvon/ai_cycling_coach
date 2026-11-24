@@ -6,3 +6,4 @@ pycache/
 data/raw/
 .env
 data/athletes.db
+tests/

@@ -1,6 +1,6 @@
-
 from src.analytics.athlete_status import get_registered_athlete_status
 from src.analytics.athlete_readiness import evaluate_readiness
+from src.athletes.athlete_manager import get_athlete_capabilities
 
 
 def build_athlete_analysis(status):
@@ -22,7 +22,11 @@ def get_registered_athlete_analysis(athlete_id):
     Получает данные зарегистрированного спортсмена
     и формирует единый аналитический контекст.
     """
-
     status = get_registered_athlete_status(athlete_id)
 
-    return build_athlete_analysis(status)
+    analysis = build_athlete_analysis(status)
+
+    # Возможности и оборудование спортсмена.
+    analysis["capabilities"] = get_athlete_capabilities(athlete_id)
+
+    return analysis

@@ -110,3 +110,38 @@ def get_wellness(days=30, *, api_key=None):
             "newest": today.isoformat()
         }
     )
+
+
+def download_activity_fit(activity_id, *, api_key=None):
+    """
+    Загружает FIT-файл конкретной тренировки
+    из Intervals.icu.
+
+    Возвращает содержимое файла в bytes.
+    Не сохраняет файл на диск.
+    """
+    if not activity_id:
+        raise ValueError("Не указан ID тренировки")
+
+    key = get_api_key(api_key)
+
+    url = (
+        f"{BASE_URL}/activity/{activity_id}/file"
+    )
+
+    response = requests.get(
+        url,
+        auth=("API_KEY", key),
+        timeout=60,
+    )
+
+    response.raise_for_status()
+
+    content = response.content
+
+    if not content:
+        raise ValueError(
+            "Intervals.icu вернул пустой файл"
+        )
+
+    return content

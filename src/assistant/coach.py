@@ -1,4 +1,3 @@
-
 import json
 
 from src.analytics.athlete_analysis import get_registered_athlete_analysis
@@ -121,6 +120,23 @@ COACH_SYSTEM_PROMPT = """
 28. Не путай средние значения за 7 дней и за 30 дней.
     Всегда указывай точный период каждого показателя.
     
+    ОБОРУДОВАНИЕ И ВОЗМОЖНОСТИ СПОРТСМЕНА:
+
+1. Учитывай capabilities при составлении рекомендаций.
+2. Если power_measurement_available = true,
+   можешь назначать тренировки по мощности в ваттах.
+3. Если power_measurement_available = false,
+   не назначай целевые диапазоны мощности.
+   Используй пульсовые зоны или субъективную интенсивность,
+   если соответствующие данные доступны.
+4. Если has_heart_rate_monitor = false,
+   не требуй контроля пульса во время тренировки.
+5. Если has_indoor_trainer = false,
+   не предполагай, что спортсмен может выполнить
+   тренировку на велостанке.
+6. Не делай выводов о наличии оборудования,
+   если соответствующее поле отсутствует.
+    
 """
 
 
@@ -188,6 +204,8 @@ def build_coach_context(analysis):
             "lthr_bpm": profile.get("lthr"),
             "max_heart_rate_bpm": profile.get("max_heart_rate")
         },
+
+        "capabilities": analysis.get("capabilities") or {},
 
         "power_zones_watts": build_power_zones_watts(profile),
 

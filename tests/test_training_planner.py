@@ -175,6 +175,13 @@ def test_build_prompt():
         },
         "readiness": {
             "overall": "mixed"
+        },
+        "capabilities": {
+            "power_measurement_available": True,
+            "power_source": None,
+            "has_indoor_trainer": False,
+            "has_heart_rate_monitor": True,
+            "has_cadence_sensor": False
         }
     }
 
@@ -183,6 +190,12 @@ def test_build_prompt():
     assert "Test Athlete" in prompt
     assert "cycling_training_load" in prompt
     assert "power_zones_watts" in prompt
+    assert "capabilities" in prompt
+    assert "power_measurement_available" in prompt
+    assert "has_indoor_trainer" in prompt
+    assert "has_heart_rate_monitor" in prompt
+
+    assert "power_source" in prompt
 
     print("\n=== PLANNING PROMPT TEST PASSED ===")
 
