@@ -130,13 +130,17 @@ def analyze_registered_athlete_workout(
     days=30,
     comparison_method="structural",
     fallback_ftp=None,
+    include_physiology=True,
 ):
     """
     Анализирует последнюю велосипедную тренировку
     зарегистрированного спортсмена.
 
-    По умолчанию используется новый
-    структурный алгоритм сравнения.
+    По умолчанию выполняет структурное
+    и физиологическое сравнение.
+
+    include_physiology=False позволяет
+    выполнить только структурное сравнение.
 
     Старый алгоритм доступен через
     comparison_method="legacy".
@@ -160,6 +164,11 @@ def analyze_registered_athlete_workout(
     }:
         raise ValueError(
             "Неизвестный метод сравнения тренировок"
+        )
+
+    if not isinstance(include_physiology, bool):
+        raise ValueError(
+            "include_physiology должен быть bool"
         )
 
     athlete_id = str(athlete_id)
@@ -189,9 +198,6 @@ def analyze_registered_athlete_workout(
             (now - latest_date).days + 1,
         )
 
-        # История должна покрывать полный
-        # период относительно последней
-        # выполненной тренировки.
         required_days = (
             days + days_since_latest
         )
@@ -234,6 +240,8 @@ def analyze_registered_athlete_workout(
                 days=days,
 
                 fallback_ftp=fallback_ftp,
+
+                include_physiology=include_physiology,
             )
         )
 
@@ -242,12 +250,14 @@ def analyze_registered_athlete_workout(
 
         "athlete_id": athlete_id,
 
-        "comparison_method": (
-            comparison_method
+        "comparison_method": comparison_method,
+
+        "physiology_requested": (
+            include_physiology
+            and comparison_method == "structural"
         ),
 
         "history_statistics": training.get(
-            "statistics",
-            {},
+            "statistics", {}
         ),
     }

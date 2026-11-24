@@ -466,13 +466,15 @@ def analyze_workout_with_structural_fit_loader(
     fit_downloader,
     days=30,
     fallback_ftp=None,
+    include_physiology=False,
 ):
     """
-    Выполняет новый структурный анализ
+    Выполняет структурный анализ
     последней велосипедной тренировки.
 
-    Загружает FIT всех потенциальных
-    кандидатов за выбранный период.
+    При include_physiology=True выполняет
+    физиологическое сравнение найденных
+    сопоставимых рабочих усилий.
     """
     from src.analytics.workout_comparison import (
         analyze_latest_workout_structural,
@@ -485,7 +487,6 @@ def analyze_workout_with_structural_fit_loader(
     if latest_workout is None:
         return {
             "status": "insufficient_data",
-
             "reason": (
                 "Не найдены велосипедные тренировки"
             ),
@@ -512,6 +513,8 @@ def analyze_workout_with_structural_fit_loader(
         days=days,
 
         fallback_ftp=fallback_ftp,
+
+        include_physiology=include_physiology,
     )
 
     latest_id = latest_workout["id"]
@@ -523,21 +526,31 @@ def analyze_workout_with_structural_fit_loader(
         {},
     )
 
+    physiology = analysis.get(
+        "physiological_comparison",
+        {},
+    )
+
+    physiology_status = physiology.get(
+        "status",
+        "not_implemented",
+    )
+
+    search_coverage_complete = (
+        not loaded["download_errors"]
+
+        and signature_statistics.get(
+            "skipped_workouts", 0
+        ) == 0
+    )
+
     if structural_status == "insufficient_data":
         status = "insufficient_data"
 
     else:
-        # Полный физиологический анализ
-        # ещё не реализован.
+        # Аэробное сравнение и ряд проверок
+        # качества пока не реализованы.
         status = "partial"
-
-    search_coverage_complete = (
-        not loaded["download_errors"]
-        and signature_statistics.get(
-            "skipped_workouts",
-            0,
-        ) == 0
-    )
 
     return {
         "status": status,
@@ -546,12 +559,14 @@ def analyze_workout_with_structural_fit_loader(
             structural_status
         ),
 
+        "physiological_analysis_status": (
+            physiology_status
+        ),
+
         "latest_workout": {
             "id": latest_id,
 
-            "name": latest_workout.get(
-                "name"
-            ),
+            "name": latest_workout.get("name"),
 
             "start_date": latest_workout.get(
                 "start_date"
@@ -571,26 +586,63 @@ def analyze_workout_with_structural_fit_loader(
                 structural_status
             ),
 
+            "physiological_analysis_status": (
+                physiology_status
+            ),
+
             "search_coverage_complete": (
                 search_coverage_complete
             ),
 
             "similar_workouts_found": analysis.get(
-                "similar_workouts_found",
-                0,
+                "similar_workouts_found", 0
             ),
 
             "successful_signatures": (
                 signature_statistics.get(
-                    "successful_signatures",
-                    0,
+                    "successful_signatures", 0
                 )
             ),
 
             "skipped_workouts": (
                 signature_statistics.get(
-                    "skipped_workouts",
-                    0,
+                    "skipped_workouts", 0
+                )
+            ),
+
+            "physiologically_analyzed_workouts": (
+                physiology.get(
+                    "compared_workouts_count", 0
+                )
+            ),
+
+            "physiologically_skipped_workouts": (
+                physiology.get(
+                    "skipped_workouts_count", 0
+                )
+            ),
+
+            "matched_efforts_count": (
+                physiology.get(
+                    "total_matched_pairs", 0
+                )
+            ),
+
+            "analyzed_efforts_count": (
+                physiology.get(
+                    "total_analyzed_pairs", 0
+                )
+            ),
+
+            "heart_rate_comparable_pairs": (
+                physiology.get(
+                    "heart_rate_comparable_pairs", 0
+                )
+            ),
+
+            "recovery_comparable_checkpoints": (
+                physiology.get(
+                    "recovery_comparable_checkpoints", 0
                 )
             ),
 
@@ -598,9 +650,7 @@ def analyze_workout_with_structural_fit_loader(
 
             "power_hr_status": "not_implemented",
 
-            "aerobic_drift_status": (
-                "not_implemented"
-            ),
+            "aerobic_drift_status": "not_implemented",
 
             "aerobic_drift_compared_workouts": 0,
         },

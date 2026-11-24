@@ -689,16 +689,15 @@ def analyze_latest_workout_structural(
     activity_records,
     days=30,
     fallback_ftp=None,
+    include_physiology=False,
 ):
     """
     Анализирует структуру последней тренировки
     и ищет похожие тренировки.
 
-    Использует фактические FIT-записи,
-    исторический FTP и контекст активности.
-
-    Не делает автоматических выводов
-    об изменении физической формы.
+    При include_physiology=True дополнительно
+    сравнивает сопоставленные рабочие усилия
+    и восстановление после них.
     """
     from src.analytics.workout_similarity import (
         find_similar_workout_signatures,
@@ -720,9 +719,7 @@ def analyze_latest_workout_structural(
     result = {
         "status": "ok",
 
-        "comparison_method": (
-            "structural_similarity"
-        ),
+        "comparison_method": "structural_similarity",
 
         "latest_workout_id": latest_workout.get(
             "id"
@@ -747,12 +744,19 @@ def analyze_latest_workout_structural(
         "similar_workouts": [],
 
         "physiological_comparison": {
-            "status": "not_implemented",
+            "status": (
+                "insufficient_data"
+                if include_physiology
+                else "not_implemented"
+            ),
+
             "fitness_change": None,
+
             "reason": (
                 "Физиологическое сравнение "
-                "сопоставленных усилий "
-                "ещё не реализовано"
+                "пока не выполнено"
+                if include_physiology
+                else "Запрошен только структурный анализ"
             ),
         },
     }
@@ -782,11 +786,14 @@ def analyze_latest_workout_structural(
 
     candidates = [
         signature
+
         for activity_id, signature
         in prepared["signatures"].items()
+
         if (
             activity_id
             != latest_signature["activity_id"]
+
             and signature["status"] == "ok"
         )
     ]
@@ -800,6 +807,23 @@ def analyze_latest_workout_structural(
     similar_workouts = similarity[
         "similar_workouts"
     ]
+
+    physiological_comparison = result[
+        "physiological_comparison"
+    ]
+
+    if include_physiology:
+        physiological_comparison = (
+            analyze_similar_workouts_physiology(
+                reference_signature=latest_signature,
+
+                signatures=prepared["signatures"],
+
+                similar_workouts=similar_workouts,
+
+                activity_records=activity_records,
+            )
+        )
 
     return {
         **result,
@@ -818,12 +842,17 @@ def analyze_latest_workout_structural(
 
         "similar_workout_ids": [
             workout["candidate_activity_id"]
+
             for workout in similar_workouts
         ],
 
         "similar_workouts": similar_workouts,
 
         "similarity_search": similarity,
+
+        "physiological_comparison": (
+            physiological_comparison
+        ),
 
         "limitations": [
             (
@@ -832,7 +861,7 @@ def analyze_latest_workout_structural(
             ),
             (
                 "Изменение физической формы "
-                "пока не оценивается"
+                "автоматически не оценивается"
             ),
             (
                 "Качество сравнения зависит "
@@ -841,6 +870,290 @@ def analyze_latest_workout_structural(
             (
                 "Сложные вложенные блоки "
                 "могут быть сопоставлены частично"
+            ),
+            (
+                "Сравнение аэробных участков "
+                "пока не реализовано"
+            ),
+        ],
+    }
+
+def analyze_similar_workouts_physiology(
+    reference_signature,
+    signatures,
+    similar_workouts,
+    activity_records,
+):
+    """
+    Выполняет физиологическое сравнение
+    последней тренировки со всеми
+    найденными аналогами.
+
+    Использует уже сформированные профили
+    и загруженные FIT-записи.
+
+    Не объединяет результаты разных
+    тренировок в единую оценку физической формы.
+    """
+    from src.analytics.workout_pair_analysis import (
+        analyze_workout_pair,
+    )
+
+    reference_id = reference_signature.get(
+        "activity_id"
+    )
+
+    reference_records = activity_records.get(
+        reference_id
+    )
+
+    comparisons = []
+    skipped_workouts = []
+
+    result = {
+        "status": "insufficient_data",
+        "comparison_method": "matched_efforts",
+        "reference_activity_id": reference_id,
+        "selected_workouts_count": len(similar_workouts),
+        "compared_workouts_count": 0,
+        "skipped_workouts_count": 0,
+        "comparisons": comparisons,
+        "skipped_workouts": skipped_workouts,
+        "fitness_change": None,
+    }
+
+    if (
+        not isinstance(reference_records, list)
+        or not reference_records
+    ):
+        return {
+            **result,
+            "reason": "Нет FIT-записей последней тренировки",
+        }
+
+    if not similar_workouts:
+        return {
+            **result,
+            "status": "no_similar_workouts",
+        }
+
+    processed_ids = set()
+
+    for similarity in similar_workouts:
+        candidate_id = similarity.get(
+            "candidate_activity_id"
+        )
+
+        candidate_info = {
+            "activity_id": candidate_id,
+            "activity_name": similarity.get(
+                "candidate_activity_name"
+            ),
+            "start_date": similarity.get(
+                "candidate_start_date"
+            ),
+            "similarity_score": similarity.get("score"),
+            "comparison_scope": similarity.get(
+                "comparison_scope"
+            ),
+        }
+
+        if (
+            candidate_id is None
+            or candidate_id == reference_id
+            or candidate_id in processed_ids
+        ):
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "invalid_or_duplicate_candidate",
+            })
+
+            continue
+
+        processed_ids.add(candidate_id)
+
+        scope = similarity.get(
+            "comparison_scope"
+        )
+
+        if scope == "aerobic_segment_candidates":
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "aerobic_comparison_not_implemented",
+            })
+
+            continue
+
+        if scope != "matched_efforts_only":
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "unsupported_comparison_scope",
+            })
+
+            continue
+
+        candidate_signature = signatures.get(
+            candidate_id
+        )
+
+        candidate_records = activity_records.get(
+            candidate_id
+        )
+
+        if (
+            not isinstance(candidate_signature, dict)
+            or candidate_signature.get("status") != "ok"
+        ):
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "missing_candidate_signature",
+            })
+
+            continue
+
+        if (
+            not isinstance(candidate_records, list)
+            or not candidate_records
+        ):
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "missing_candidate_records",
+            })
+
+            continue
+
+        try:
+            comparison = analyze_workout_pair(
+                reference_signature=reference_signature,
+                candidate_signature=candidate_signature,
+                similarity=similarity,
+                reference_records=reference_records,
+                candidate_records=candidate_records,
+            )
+
+        except Exception as error:
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "physiological_analysis_error",
+                "error_type": type(error).__name__,
+            })
+
+            continue
+
+        if (
+            comparison.get("status") not in {
+                "ok",
+                "partial",
+            }
+            or comparison.get(
+                "analyzed_pairs_count", 0
+            ) == 0
+        ):
+            skipped_workouts.append({
+                **candidate_info,
+                "reason": "physiological_comparison_unavailable",
+                "analysis_status": comparison.get("status"),
+            })
+
+            continue
+
+        comparisons.append({
+            **candidate_info,
+            "analysis": comparison,
+        })
+
+    total_analyzed_pairs = sum(
+        comparison["analysis"].get(
+            "analyzed_pairs_count", 0
+        )
+        for comparison in comparisons
+    )
+
+    total_matched_pairs = sum(
+        comparison["analysis"].get(
+            "matched_pairs_count", 0
+        )
+        for comparison in comparisons
+    )
+
+    heart_rate_comparable_pairs = sum(
+        comparison["analysis"]
+        .get("summary", {})
+        .get("heart_rate_comparable_pairs", 0)
+
+        for comparison in comparisons
+    )
+
+    recovery_comparable_checkpoints = sum(
+        pair.get("recovery_comparison", {}).get(
+            "comparable_checkpoints", 0
+        )
+
+        for comparison in comparisons
+
+        for pair in comparison["analysis"].get(
+            "pairs", []
+        )
+    )
+
+    if not comparisons:
+        if skipped_workouts and all(
+            item["reason"]
+            == "aerobic_comparison_not_implemented"
+
+            for item in skipped_workouts
+        ):
+            status = "not_implemented"
+
+        else:
+            status = "insufficient_data"
+
+    elif (
+        skipped_workouts
+        or any(
+            item["analysis"]["status"] != "ok"
+
+            for item in comparisons
+        )
+    ):
+        status = "partial"
+
+    else:
+        status = "ok"
+
+    return {
+        **result,
+        "status": status,
+        "compared_workouts_count": len(comparisons),
+        "skipped_workouts_count": len(skipped_workouts),
+        "total_matched_pairs": total_matched_pairs,
+        "total_analyzed_pairs": total_analyzed_pairs,
+        "heart_rate_comparable_pairs": (
+            heart_rate_comparable_pairs
+        ),
+        "recovery_comparable_checkpoints": (
+            recovery_comparable_checkpoints
+        ),
+        "limitations": [
+            (
+                "Физиологические результаты "
+                "рассчитываются отдельно для каждого аналога"
+            ),
+            (
+                "Одно усилие последней тренировки "
+                "может сравниваться с несколькими тренировками"
+            ),
+            (
+                "Количество пар не является количеством "
+                "независимых физиологических наблюдений"
+            ),
+            (
+                "Сравнение аэробных участков "
+                "ещё не реализовано"
+            ),
+            (
+                "Автоматическая оценка изменения "
+                "физической формы не выполняется"
             ),
         ],
     }
