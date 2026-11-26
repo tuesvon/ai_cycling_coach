@@ -261,3 +261,161 @@ def analyze_registered_athlete_workout(
             "statistics", {}
         ),
     }
+
+def analyze_registered_athlete_workout_unified(
+    athlete_id,
+    days=30,
+    fallback_ftp=None,
+    max_aerobic_workouts=5,
+):
+    """
+    Полный анализ последней тренировки
+    зарегистрированного спортсмена.
+    """
+    from datetime import datetime, timezone
+
+    from src.athletes.data_loader import (
+        get_registered_athlete_unified_training,
+    )
+
+    from src.athletes.credentials import (
+        get_api_key as get_stored_api_key,
+    )
+
+    from src.analytics.workout_comparison import (
+        parse_activity_date,
+    )
+
+    from src.analytics.workout_comparison_loader import (
+        analyze_workout_with_unified_fit_loader,
+    )
+
+    if (
+        not isinstance(days, int)
+        or isinstance(days, bool)
+        or days <= 0
+    ):
+        raise ValueError(
+            "days должен быть положительным целым числом"
+        )
+
+    requested_history_days = days + 2
+
+    training = (
+        get_registered_athlete_unified_training(
+            athlete_id=athlete_id,
+
+            days=requested_history_days,
+        )
+    )
+
+    activities = prepare_comparison_activities(
+        training["activities"]
+    )
+
+    now = datetime.now(timezone.utc)
+
+    cycling_dates = []
+
+    for activity in activities:
+
+        if activity.get("type") != "cycling":
+            continue
+
+        activity_date = parse_activity_date(
+            activity.get("start_date")
+        )
+
+        if (
+            activity_date is not None
+            and activity_date < now
+        ):
+            cycling_dates.append(
+                activity_date
+            )
+
+    if cycling_dates:
+
+        latest_date = max(cycling_dates)
+
+        days_since_latest = max(
+            0,
+
+            (now - latest_date).days + 1,
+        )
+
+        required_history_days = (
+            days
+            + days_since_latest
+            + 2
+        )
+
+        if (
+            required_history_days
+            > requested_history_days
+        ):
+            requested_history_days = (
+                required_history_days
+            )
+
+            training = (
+                get_registered_athlete_unified_training(
+                    athlete_id=athlete_id,
+
+                    days=requested_history_days,
+                )
+            )
+
+            activities = (
+                prepare_comparison_activities(
+                    training["activities"]
+                )
+            )
+
+    api_key = get_stored_api_key(
+        athlete_id=athlete_id,
+
+        provider="intervals",
+    )
+
+    if not api_key:
+
+        return {
+            "status": "insufficient_data",
+
+            "athlete_id": athlete_id,
+
+            "reason": "missing_intervals_api_key",
+
+            "analysis": None,
+
+            "fitness_change": None,
+        }
+
+    downloader = create_intervals_fit_downloader(
+        api_key
+    )
+
+    result = analyze_workout_with_unified_fit_loader(
+        activities=activities,
+
+        fit_downloader=downloader,
+
+        days=days,
+
+        fallback_ftp=fallback_ftp,
+
+        max_aerobic_workouts=max_aerobic_workouts,
+    )
+
+    return {
+        **result,
+
+        "athlete_id": athlete_id,
+
+        "comparison_method": "unified",
+
+        "requested_history_days": (
+            requested_history_days
+        ),
+    }

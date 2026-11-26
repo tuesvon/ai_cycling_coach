@@ -1157,3 +1157,673 @@ def analyze_similar_workouts_physiology(
             ),
         ],
     }
+
+def analyze_latest_workout_unified(
+    latest_workout,
+    activities,
+    activity_records,
+    days=30,
+    fallback_ftp=None,
+    max_aerobic_workouts=5,
+):
+    """
+    Объединяет структурную, интервальную,
+    целевую и аэробную аналитику.
+
+    Использует уже загруженные FIT-записи.
+
+    Не обращается к внешним API.
+    Не формирует самостоятельных выводов
+    об изменении физической формы.
+    """
+    from datetime import timedelta
+
+    from src.analytics.workout_signature import (
+        resolve_workout_ftp,
+        extract_workout_conditions,
+    )
+
+    from src.analytics.workout_target_matching import (
+        analyze_target_actual_workout,
+    )
+
+    from src.analytics.aerobic_segment_analysis import (
+        analyze_aerobic_workout,
+    )
+
+    from src.analytics.aerobic_workout_comparison import (
+        analyze_aerobic_workout_history,
+    )
+
+    if (
+        not isinstance(days, int)
+        or isinstance(days, bool)
+        or days <= 0
+    ):
+        raise ValueError(
+            "days должен быть положительным целым числом"
+        )
+
+    if (
+        not isinstance(max_aerobic_workouts, int)
+        or isinstance(max_aerobic_workouts, bool)
+        or max_aerobic_workouts <= 0
+    ):
+        raise ValueError(
+            "max_aerobic_workouts должен быть "
+            "положительным целым числом"
+        )
+
+    result = {
+        "status": "insufficient_data",
+
+        "analysis_version": "unified_v1",
+
+        "comparison_period_days": days,
+
+        "latest_workout": None,
+
+        "ftp_info": None,
+
+        "conditions": None,
+
+        "structural_analysis": None,
+
+        "interval_analysis": None,
+
+        "target_analysis": None,
+
+        "aerobic_analysis": None,
+
+        "aerobic_history": None,
+
+        "history_statistics": {},
+
+        "analysis_completeness": {},
+
+        "fitness_change": None,
+
+        "limitations": [],
+    }
+
+    if not isinstance(latest_workout, dict):
+        return {
+            **result,
+            "reason": "missing_latest_workout",
+        }
+
+    latest_id = latest_workout.get("id")
+
+    latest_date = parse_activity_date(
+        latest_workout.get("start_date")
+    )
+
+    result["latest_workout"] = {
+        "id": latest_id,
+
+        "name": latest_workout.get("name"),
+
+        "start_date": latest_workout.get(
+            "start_date"
+        ),
+    }
+
+    if not latest_id or latest_date is None:
+        return {
+            **result,
+            "reason": "invalid_latest_workout",
+        }
+
+    latest_records = activity_records.get(
+        latest_id
+    )
+
+    if not latest_records:
+        return {
+            **result,
+            "reason": "missing_latest_fit_records",
+        }
+
+    ftp_info = resolve_workout_ftp(
+        latest_workout,
+        fallback_ftp=fallback_ftp,
+    )
+
+    ftp = ftp_info.get("ftp")
+
+    conditions = extract_workout_conditions(
+        latest_workout
+    )
+
+    ignore_power = (
+        conditions.get("ignore_power") is True
+    )
+
+    ignore_heart_rate = (
+        conditions.get("ignore_heart_rate") is True
+    )
+
+    result["ftp_info"] = ftp_info
+    result["conditions"] = conditions
+
+    if ftp is None or ftp <= 0:
+        return {
+            **result,
+            "reason": "invalid_or_missing_ftp",
+        }
+
+    if ignore_power:
+        return {
+            **result,
+            "status": "power_ignored",
+            "reason": "latest_workout_power_ignored",
+        }
+
+    cutoff = latest_date - timedelta(
+        days=days
+    )
+
+    history = []
+    skipped_history = []
+
+    seen_ids = {latest_id}
+
+    for activity in activities:
+
+        if not isinstance(activity, dict):
+            continue
+
+        activity_id = activity.get("id")
+
+        activity_date = parse_activity_date(
+            activity.get("start_date")
+        )
+
+        reason = None
+
+        if not activity_id:
+            reason = "missing_activity_id"
+
+        elif activity_id == latest_id:
+            continue
+
+        elif activity_id in seen_ids:
+            reason = "duplicate_activity"
+
+        elif activity.get("type") != "cycling":
+            reason = "not_cycling"
+
+        elif activity_date is None:
+            reason = "invalid_activity_date"
+
+        elif activity_date >= latest_date:
+            reason = "not_historical"
+
+        elif activity_date < cutoff:
+            reason = "outside_history_period"
+
+        if reason is not None:
+
+            skipped_history.append({
+                "activity_id": activity_id,
+                "reason": reason,
+            })
+
+            continue
+
+        seen_ids.add(activity_id)
+
+        history.append(activity)
+
+    history.sort(
+        key=lambda activity: (
+            parse_activity_date(
+                activity["start_date"]
+            ),
+            activity["id"],
+        ),
+
+        reverse=True,
+    )
+
+    history_with_records = []
+
+    missing_fit_ids = []
+
+    for activity in history:
+
+        activity_id = activity["id"]
+
+        if not activity_records.get(activity_id):
+
+            missing_fit_ids.append(
+                activity_id
+            )
+
+            continue
+
+        history_with_records.append(activity)
+
+    selected_activities = [
+        latest_workout,
+        *history_with_records,
+    ]
+
+    selected_records = {
+        activity["id"]: activity_records[
+            activity["id"]
+        ]
+
+        for activity in selected_activities
+    }
+
+    # 1. Структурная и интервальная аналитика.
+
+    structural = analyze_latest_workout_structural(
+        latest_workout=latest_workout,
+
+        activities=selected_activities,
+
+        activity_records=selected_records,
+
+        days=days,
+
+        fallback_ftp=fallback_ftp,
+
+        include_physiology=True,
+    )
+
+    interval_analysis = structural.get(
+        "physiological_comparison"
+    ) or {
+        "status": "insufficient_data",
+        "fitness_change": None,
+    }
+
+    result["structural_analysis"] = structural
+
+    result["interval_analysis"] = interval_analysis
+
+    # 2. Анализ выполнения целевого задания.
+
+    target_analysis = analyze_target_actual_workout(
+        records=latest_records,
+
+        signature=structural.get(
+            "latest_signature"
+        ),
+
+        ftp=ftp,
+
+        ignore_power=ignore_power,
+
+        ignore_heart_rate=ignore_heart_rate,
+    )
+
+    result["target_analysis"] = target_analysis
+
+    # 3. Аэробная физиология последней тренировки.
+
+    aerobic_analysis = analyze_aerobic_workout(
+        records=latest_records,
+
+        ftp=ftp,
+
+        riding_mode="unknown",
+
+        ignore_power=ignore_power,
+
+        ignore_heart_rate=ignore_heart_rate,
+    )
+
+    result["aerobic_analysis"] = aerobic_analysis
+
+    reference_workout = {
+        "activity_id": latest_id,
+
+        "activity_name": latest_workout.get(
+            "name"
+        ),
+
+        "start_date": latest_workout.get(
+            "start_date"
+        ),
+
+        "conditions": conditions,
+
+        "ftp_info": ftp_info,
+
+        "analysis": aerobic_analysis,
+    }
+
+    # 4. Аэробная аналитика исторических тренировок.
+    #
+    # Если в последней тренировке нет
+    # пригодных аэробных сегментов,
+    # не запускаем аэробный анализ истории.
+
+    aerobic_history_workouts = []
+
+    skipped_aerobic_history = []
+
+    aerobic_history_requested = bool(
+        aerobic_analysis.get("segments")
+    )
+
+    if aerobic_history_requested:
+
+        for activity in history_with_records:
+
+            activity_id = activity["id"]
+
+            historical_ftp_info = resolve_workout_ftp(
+                activity,
+
+                fallback_ftp=fallback_ftp,
+            )
+
+            historical_ftp = (
+                historical_ftp_info.get("ftp")
+            )
+
+            if (
+                historical_ftp is None
+                or historical_ftp <= 0
+            ):
+                skipped_aerobic_history.append({
+                    "activity_id": activity_id,
+
+                    "reason": "invalid_or_missing_ftp",
+                })
+
+                continue
+
+            historical_conditions = (
+                extract_workout_conditions(
+                    activity
+                )
+            )
+
+            historical_analysis = (
+                analyze_aerobic_workout(
+                    records=selected_records[
+                        activity_id
+                    ],
+
+                    ftp=historical_ftp,
+
+                    riding_mode="unknown",
+
+                    ignore_power=(
+                        historical_conditions.get(
+                            "ignore_power"
+                        ) is True
+                    ),
+
+                    ignore_heart_rate=(
+                        historical_conditions.get(
+                            "ignore_heart_rate"
+                        ) is True
+                    ),
+                )
+            )
+
+            aerobic_history_workouts.append({
+                "activity_id": activity_id,
+
+                "activity_name": activity.get(
+                    "name"
+                ),
+
+                "start_date": activity.get(
+                    "start_date"
+                ),
+
+                "ftp_info": historical_ftp_info,
+
+                "conditions": historical_conditions,
+
+                "analysis": historical_analysis,
+            })
+
+    aerobic_history = (
+        analyze_aerobic_workout_history(
+            reference_workout=reference_workout,
+
+            historical_workouts=(
+                aerobic_history_workouts
+            ),
+
+            days=days,
+
+            max_workouts=max_aerobic_workouts,
+        )
+    )
+
+    result["aerobic_history"] = aerobic_history
+
+    # 5. Оценка полноты аналитики.
+
+    structural_signature = structural.get(
+        "latest_signature"
+    ) or {}
+
+    structural_available = (
+        structural_signature.get("status")
+        in {"ok", "partial"}
+    )
+
+    interval_status = interval_analysis.get(
+        "status"
+    )
+
+    target_status = target_analysis.get(
+        "status"
+    )
+
+    aerobic_status = aerobic_analysis.get(
+        "status"
+    )
+
+    aerobic_summary = aerobic_analysis.get(
+        "summary"
+    ) or {}
+
+    aerobic_history_summary = (
+        aerobic_history.get("summary") or {}
+    )
+
+    history_coverage_complete = (
+        not missing_fit_ids
+    )
+
+    limitations = []
+
+    if missing_fit_ids:
+
+        limitations.append(
+            "incomplete_historical_fit_coverage"
+        )
+
+    if ignore_heart_rate:
+
+        limitations.append(
+            "heart_rate_ignored"
+        )
+
+    if not structural_available:
+
+        limitations.append(
+            "structural_analysis_unavailable"
+        )
+
+    if target_status != "ok":
+
+        limitations.append(
+            "target_analysis_unavailable_or_partial"
+        )
+
+    if interval_status == "partial":
+
+        limitations.append(
+            "partial_interval_comparison"
+        )
+
+    if aerobic_status == "partial":
+
+        limitations.append(
+            "partial_aerobic_analysis"
+        )
+
+    if skipped_aerobic_history:
+
+        limitations.append(
+            "incomplete_aerobic_history"
+        )
+
+    if (
+        aerobic_history_requested
+
+        and aerobic_history.get("status") != "ok"
+    ):
+
+        limitations.append(
+            "aerobic_history_limited_or_unavailable"
+        )
+
+    available_analysis = (
+        structural_available
+
+        or target_status in {"ok", "partial"}
+
+        or interval_status in {"ok", "partial"}
+
+        or aerobic_status in {"ok", "partial"}
+    )
+
+    if not available_analysis:
+        status = "insufficient_data"
+
+    elif limitations:
+        status = "partial"
+
+    else:
+        status = "ok"
+
+    return {
+        **result,
+
+        "status": status,
+
+        "history_statistics": {
+            "period_days": days,
+
+            "eligible_history_workouts": len(
+                history
+            ),
+
+            "history_workouts_with_fit": len(
+                history_with_records
+            ),
+
+            "missing_fit_count": len(
+                missing_fit_ids
+            ),
+
+            "missing_fit_activity_ids": (
+                missing_fit_ids
+            ),
+
+            "history_coverage_complete": (
+                history_coverage_complete
+            ),
+
+            "skipped_history": skipped_history,
+
+            "aerobic_history_requested": (
+                aerobic_history_requested
+            ),
+
+            "aerobic_history_processed": len(
+                aerobic_history_workouts
+            ),
+
+            "skipped_aerobic_history": (
+                skipped_aerobic_history
+            ),
+        },
+
+        "analysis_completeness": {
+            "structural_analysis_available": (
+                structural_available
+            ),
+
+            "interval_analysis_status": (
+                interval_status
+            ),
+
+            "target_analysis_status": (
+                target_status
+            ),
+
+            "aerobic_analysis_status": (
+                aerobic_status
+            ),
+
+            "aerobic_history_status": (
+                aerobic_history.get("status")
+            ),
+
+            "aerobic_segments_count": (
+                aerobic_summary.get(
+                    "analyzed_segments_count",
+                    0,
+                )
+            ),
+
+            "aerobic_heart_rate_segments_count": (
+                aerobic_summary.get(
+                    "heart_rate_segments_count",
+                    0,
+                )
+            ),
+
+            "aerobic_drift_segments_count": (
+                aerobic_summary.get(
+                    "drift_segments_count",
+                    0,
+                )
+            ),
+
+            "aerobic_comparable_workouts": (
+                aerobic_history_summary.get(
+                    "comparable_workouts_found",
+                    0,
+                )
+            ),
+
+            "aerobic_matched_pairs_count": (
+                aerobic_history_summary.get(
+                    "matched_pairs_count",
+                    0,
+                )
+            ),
+
+            "aerobic_drift_comparable_pairs_count": (
+                aerobic_history_summary.get(
+                    "drift_comparable_pairs_count",
+                    0,
+                )
+            ),
+
+            "heart_rate_ignored": (
+                ignore_heart_rate
+            ),
+
+            "history_coverage_complete": (
+                history_coverage_complete
+            ),
+        },
+
+        "limitations": limitations,
+    }

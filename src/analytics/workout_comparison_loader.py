@@ -657,3 +657,296 @@ def analyze_workout_with_structural_fit_loader(
 
         "analysis": analysis,
     }
+
+def analyze_workout_with_unified_fit_loader(
+    activities,
+    fit_downloader,
+    days=30,
+    fallback_ftp=None,
+    max_aerobic_workouts=5,
+):
+    """
+    Загружает FIT-файлы один раз
+    и передаёт записи объединённой аналитике.
+    """
+    from datetime import datetime, timedelta, timezone
+    from time import perf_counter
+
+    from src.analytics.workout_comparison import (
+        parse_activity_date,
+        analyze_latest_workout_unified,
+    )
+
+    if (
+        not isinstance(days, int)
+        or isinstance(days, bool)
+        or days <= 0
+    ):
+        raise ValueError(
+            "days должен быть положительным целым числом"
+        )
+
+    result = {
+        "status": "insufficient_data",
+
+        "latest_workout": None,
+
+        "download_statistics": {
+            "requested_workouts": 0,
+
+            "successful_downloads": 0,
+
+            "failed_downloads": 0,
+
+            "total_download_seconds": 0,
+
+            "analysis_seconds": 0,
+        },
+
+        "download_errors": [],
+
+        "analysis_completeness": {},
+
+        "analysis": None,
+
+        "fitness_change": None,
+    }
+
+    now = datetime.now(timezone.utc)
+
+    completed = []
+    seen_ids = set()
+
+    for activity in activities:
+
+        if not isinstance(activity, dict):
+            continue
+
+        if activity.get("type") != "cycling":
+            continue
+
+        activity_id = activity.get("id")
+
+        activity_date = parse_activity_date(
+            activity.get("start_date")
+        )
+
+        duration = activity.get(
+            "duration_seconds"
+        )
+
+        if not activity_id:
+            continue
+
+        if activity_id in seen_ids:
+            continue
+
+        if activity_date is None:
+            continue
+
+        if activity_date >= now:
+            continue
+
+        if (
+            isinstance(duration, (int, float))
+
+            and not isinstance(duration, bool)
+
+            and duration > 0
+        ):
+            end_date = activity_date + timedelta(
+                seconds=duration
+            )
+
+            if end_date > now:
+                continue
+
+        seen_ids.add(activity_id)
+
+        completed.append(activity)
+
+    if not completed:
+
+        return {
+            **result,
+
+            "reason": "no_completed_cycling_workouts",
+        }
+
+    completed.sort(
+        key=lambda activity: (
+            parse_activity_date(
+                activity["start_date"]
+            ),
+            activity["id"],
+        ),
+
+        reverse=True,
+    )
+
+    latest = completed[0]
+
+    latest_id = latest["id"]
+
+    latest_date = parse_activity_date(
+        latest["start_date"]
+    )
+
+    cutoff = latest_date - timedelta(
+        days=days
+    )
+
+    selected = [
+        latest,
+
+        *[
+            activity
+
+            for activity in completed[1:]
+
+            if (
+                cutoff
+
+                <= parse_activity_date(
+                    activity["start_date"]
+                )
+
+                < latest_date
+            )
+        ],
+    ]
+
+    result["latest_workout"] = {
+        "id": latest_id,
+
+        "name": latest.get("name"),
+
+        "start_date": latest.get("start_date"),
+    }
+
+    records_by_activity = {}
+
+    errors = []
+
+    download_start = perf_counter()
+
+    for activity in selected:
+
+        activity_id = activity["id"]
+
+        try:
+
+            content = fit_downloader(activity)
+
+            records = read_fit_bytes(content)
+
+            if not records:
+                raise ValueError(
+                    "FIT does not contain records"
+                )
+
+        except Exception as error:
+
+            errors.append({
+                "activity_id": activity_id,
+
+                "activity_name": activity.get(
+                    "name"
+                ),
+
+                "error_type": type(error).__name__,
+            })
+
+            # Нет последней тренировки —
+            # историческое сравнение невозможно.
+
+            if activity_id == latest_id:
+                break
+
+            continue
+
+        records_by_activity[
+            activity_id
+        ] = records
+
+    download_seconds = round(
+        perf_counter() - download_start,
+        3,
+    )
+
+    statistics = {
+        "requested_workouts": len(selected),
+
+        "attempted_downloads": (
+            len(records_by_activity)
+            + len(errors)
+        ),
+
+        "successful_downloads": len(
+            records_by_activity
+        ),
+
+        "failed_downloads": len(errors),
+
+        "total_download_seconds": (
+            download_seconds
+        ),
+
+        "analysis_seconds": 0,
+    }
+
+    result["download_statistics"] = statistics
+
+    result["download_errors"] = errors
+
+    if latest_id not in records_by_activity:
+
+        return {
+            **result,
+
+            "status": "error",
+
+            "reason": "latest_fit_unavailable",
+        }
+
+    analysis_start = perf_counter()
+
+    analysis = analyze_latest_workout_unified(
+        latest_workout=latest,
+
+        activities=selected,
+
+        activity_records=records_by_activity,
+
+        days=days,
+
+        fallback_ftp=fallback_ftp,
+
+        max_aerobic_workouts=max_aerobic_workouts,
+    )
+
+    statistics["analysis_seconds"] = round(
+        perf_counter() - analysis_start,
+        3,
+    )
+
+    status = analysis["status"]
+
+    if errors and status == "ok":
+        status = "partial"
+
+    return {
+        **result,
+
+        "status": status,
+
+        "download_statistics": statistics,
+
+        "download_errors": errors,
+
+        "analysis_completeness": analysis.get(
+            "analysis_completeness"
+        ) or {},
+
+        "analysis": analysis,
+    }
